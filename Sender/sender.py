@@ -2,6 +2,7 @@ from threading import Thread
 from multiprocessing import Process, Manager
 from sympy import sieve
 
+import struct
 import logging
 import socket
 import sys
@@ -27,22 +28,25 @@ def start_processes(sock):
 def recieve(shared_queue, sock):
     while True:
         data, adress = sock.recvfrom(4096)
-        print("RECV: " + str(data))
-        print("RECV: " + str(adress))
+        logging.info("RECV: " + str(unpack_data(data)))
+        logging.info("RECV: " + str(adress))
 
 def send(shared_queue, sock):
-    message = {'num': None, 'ignore': False}
     sieve.extend(200)
     try:
         for x in range(200):
             time.sleep(1)
             if x in sieve:
-                message['ignore'] = True
-            print("SEND: " + str(message))
-            sent = sock.sendto(str.encode(str(message)), (IP, PORT))
-            print("SENT: " + str(sent))
+                data = pack_data(x, True, False)
+            else:
+                data = pack_data(x, False, False)
+                
+            logging.info("SEND: " + str(struct.unpack("=B??", data)))
+            sent = sock.sendto(data, (IP, PORT))
+            logging.info("SENT: " + str(sent))
+            
     finally:
-        print("CLOSING")
+        logging.info("CLOSING")
         sock.close()
 
 def keyboard(listener_process, response_process):
@@ -53,6 +57,14 @@ def keyboard(listener_process, response_process):
             listener_process.terminate()
             response_process.terminate()
             sys.exit()
+
+def pack_data(package_num, prime, resend):
+    fmt = "=B??"
+    return struct.pack(fmt, package_num, prime, resend)
+
+def unpack_data(package_num):
+    fmt = "=B"
+    return struct.pack(fmt, package_num)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

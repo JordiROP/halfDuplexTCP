@@ -1,6 +1,7 @@
 from threading import Thread
 from multiprocessing import Process, Manager
 
+import struct
 import socket
 import sys
 import logging
@@ -28,9 +29,10 @@ def listen(shared_queue, sock):
         while True: 
             # Receive data
             data, address = sock.recvfrom(4096)
-            logging.info("RECV: " + str(data))
+            logging.info("RECV: " + str(struct.unpack('=B??' ,data)))
             logging.info("RECV: " + str(address))
-            shared_queue.put((data, address))
+            package_num = unpack_data(data)[0]
+            shared_queue.put((package_num, (data, address)))
 
     finally:
         logging.info("CLOSING")
@@ -42,7 +44,7 @@ def response(shared_queue, sock):
             if not shared_queue.empty():
                 segment = shared_queue.get()
                 address = segment[1]
-                message = str.encode("Server response")
+                message = pack_data(segment[0])
                 # Send data
                 logging.info("SEND: " + str(message))
                 logging.info("SEND: " + str(address))
@@ -61,6 +63,13 @@ def keyboard(listener_process, response_process):
             response_process.terminate()
             sys.exit()
 
+def pack_data(package_num):
+    fmt = "=B"
+    return struct.pack(fmt, package_num)
+
+def unpack_data(data):
+    fmt = "=B??"
+    return struct.unpack(fmt, data)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
