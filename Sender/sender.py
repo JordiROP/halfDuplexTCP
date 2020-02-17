@@ -9,7 +9,7 @@ def create_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     message = str.encode('Hi, im the client')
     try:
-        for x in range(5):
+        for _ in range(5):
             time.sleep(2)
             # Send data
             print("SEND: " + str(message))
