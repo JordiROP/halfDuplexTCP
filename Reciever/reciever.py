@@ -1,6 +1,7 @@
 from threading import Thread
 from multiprocessing import Process, Manager
 
+import time
 import struct
 import socket
 import sys
@@ -29,10 +30,10 @@ def listen(shared_queue, sock):
         while True: 
             # Receive data
             data, address = sock.recvfrom(4096)
-            logging.info("RECV: " + str(struct.unpack('=B??' ,data)))
+            logging.info("RECV: " + str(struct.unpack('=B??', data)))
             logging.info("RECV: " + str(address))
             package_num = unpack_data(data)[0]
-            shared_queue.put((package_num, (data, address)))
+            shared_queue.put((package_num, (data, address), time.time_ns()))
 
     finally:
         logging.info("CLOSING")
@@ -43,16 +44,23 @@ def response(shared_queue, sock):
         while True:
             if not shared_queue.empty():
                 segment = shared_queue.get()
-                address = segment[1]
-                message = pack_data(segment[0])
-                # Send data
-                logging.info("SEND: " + str(message))
-                logging.info("SEND: " + str(address))
-                sent = sock.sendto(message, address)
-                logging.info("SENT: " + str(sent))
+                response_thread = Thread(target=send_response, args=(segment,))
+                response_thread.start()
     finally:
         logging.info("CLOSING")
         sock.close()
+
+def send_response(segment):
+    package_num = pack_data(segment[0])
+    address = segment[1][1]
+    recv_time = segment[2]
+    
+    while(True):
+        if time.time_ns()-recv_time >= 2000000000: 
+            logging.info("SEND Package#: " + str(struct.unpack('=B',package_num)[0]))
+            logging.info("SEND Address: " + str(address))
+            _ = sock.sendto(package_num, address)
+            exit()
 
 def keyboard(listener_process, response_process):
     logging.info
@@ -72,6 +80,9 @@ def unpack_data(data):
     return struct.unpack(fmt, data)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='(%(asctime)s %(levelname)s) %(message)s', 
+        datefmt='%H:%M:%S')
     sock = create_socket()
     start_processes(sock)
