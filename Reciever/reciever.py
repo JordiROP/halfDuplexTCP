@@ -1,11 +1,13 @@
 from threading import Thread
 from multiprocessing import Process, Manager
 
+import typing
 import time
 import struct
 import socket
 import sys
 import logging
+import copy
 IP = '127.0.0.1'
 PORT = 20001
 
@@ -17,7 +19,7 @@ def create_socket():
 
 def start_processes(sock):
     manager = Manager()
-    shared_queue = manager.Queue()
+    shared_queue = manager.list()
     listener_process = Process(target=listen, args=(shared_queue, sock))
     response_process = Process(target=response, args=(shared_queue, sock))
     listener_process.start()
@@ -27,13 +29,15 @@ def start_processes(sock):
 def listen(shared_queue, sock):
     logging.info("Server listening")
     try:
-        while True: 
-            # Receive data
+        while True:
             data, address = sock.recvfrom(4096)
             logging.info("RECV: " + str(struct.unpack('=B??', data)))
-            logging.info("RECV: " + str(address))
-            package_num = unpack_data(data)[0]
-            shared_queue.put((package_num, (data, address), time.time_ns()))
+            unpacked_data = unpack_data(data) 
+            package_num = unpacked_data[0]
+            prime = unpacked_data[1]
+            resent = unpacked_data[2]
+            if not prime or resent:
+                shared_queue.append((package_num, (data, address)))
 
     finally:
         logging.info("CLOSING")
@@ -42,10 +46,18 @@ def listen(shared_queue, sock):
 def response(shared_queue, sock):
     try:
         while True:
-            if not shared_queue.empty():
-                segment = shared_queue.get()
+            if len(shared_queue) != 0 :
+                if len(shared_queue) < 3:
+                    time.sleep(2.0)
+                    segment = shared_queue.pop(0)
+                else:
+                    segment = shared_queue.pop()
+                    queue_len = len(shared_queue)
+                    for x in reversed(range(queue_len)):
+                        shared_queue.pop(x)
                 response_thread = Thread(target=send_response, args=(segment,))
                 response_thread.start()
+                    
     finally:
         logging.info("CLOSING")
         sock.close()
@@ -53,14 +65,9 @@ def response(shared_queue, sock):
 def send_response(segment):
     package_num = pack_data(segment[0])
     address = segment[1][1]
-    recv_time = segment[2]
-    
-    while(True):
-        if time.time_ns()-recv_time >= 2000000000: 
-            logging.info("SEND Package#: " + str(struct.unpack('=B',package_num)[0]))
-            logging.info("SEND Address: " + str(address))
-            _ = sock.sendto(package_num, address)
-            exit()
+    logging.info("SEND Package# ACK: " + str(struct.unpack('=B',package_num)[0]))
+    _ = sock.sendto(package_num, address)
+    exit()
 
 def keyboard(listener_process, response_process):
     logging.info
