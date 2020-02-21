@@ -8,8 +8,10 @@ import socket
 import sys
 import logging
 import copy
+
 IP = '127.0.0.1'
 PORT = 20001
+cwnd = {}
 
 def create_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -31,13 +33,15 @@ def listen(shared_queue, sock):
     try:
         while True:
             data, address = sock.recvfrom(4096)
-            logging.info("RECV: " + str(struct.unpack('=B??', data)))
             unpacked_data = unpack_data(data) 
             package_num = unpacked_data[0]
             prime = unpacked_data[1]
             resent = unpacked_data[2]
             if not prime or resent:
+                logging.info("RECV: " + str(struct.unpack('=B??', data)))
                 shared_queue.append((package_num, (data, address)))
+                cwnd[package_num] = len(shared_queue)
+                logging.info("BUFFERSIZE: " + str(len(shared_queue)))
 
     finally:
         logging.info("CLOSING")
@@ -50,13 +54,14 @@ def response(shared_queue, sock):
                 if len(shared_queue) < 3:
                     time.sleep(2.0)
                     segment = shared_queue.pop(0)
+                    response_thread = Thread(target=send_response, args=(segment,))
+                    response_thread.start()
                 else:
-                    segment = shared_queue.pop()
                     queue_len = len(shared_queue)
                     for x in reversed(range(queue_len)):
-                        shared_queue.pop(x)
-                response_thread = Thread(target=send_response, args=(segment,))
-                response_thread.start()
+                        segment = shared_queue.pop(x)
+                        response_thread = Thread(target=send_response, args=(segment,))
+                        response_thread.start()
                     
     finally:
         logging.info("CLOSING")
