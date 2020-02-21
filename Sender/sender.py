@@ -42,8 +42,7 @@ def send(shared_queue, sock):
                 data = pack_data(x, False, False)
                 
             logging.info("SEND: " + str(struct.unpack("=B??", data)))
-            sent = sock.sendto(data, (IP, PORT))
-            logging.info("SENT: " + str(sent))
+            _ = sock.sendto(data, (IP, PORT))
             
     finally:
         logging.info("CLOSING")
@@ -64,9 +63,12 @@ def pack_data(package_num, prime, resend):
 
 def unpack_data(package_num):
     fmt = "=B"
-    return struct.pack(fmt, package_num)
+    return struct.unpack(fmt, package_num)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='(%(asctime)s %(levelname)s) %(message)s', 
+        datefmt='%H:%M:%S')
     sock = create_socket()
     start_processes(sock)
