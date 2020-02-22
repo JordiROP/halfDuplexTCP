@@ -11,7 +11,12 @@ import time
 IP = '127.0.0.1'
 PORT = 20001
 ALPHA = 0.8
-sRTT = 15
+sRTT = 5
+
+cwini = 1 # MSS
+cwnd = 1  # MSS
+
+adv_wnd = sys.maxsize
 
 def create_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -20,49 +25,72 @@ def create_socket():
 
 def start_processes(sock):
     manager = Manager()
-    shared_dict = manager.dict()
-    timeout = manager.Value(10)
-    listener_process = Process(target=recieve, args=(shared_dict, sock, timeout))
-    response_process = Process(target=send, args=(shared_dict, sock, timeout))
+    shared_dict = manager.dict()  # (RTT, sRTT, timeout, cwnd, eff_wnd)
+    ack_dict = manager.dict()
+    timeout = manager.Value('timeout', 10.0)
+    cwnd = manager.Value('cwnd', 1)
+    cwmax = manager.Value('cwmax', 10)
+    listener_process = Process(target=recieve, args=(shared_dict, sock, timeout, cwnd, cwmax, ack_dict))
+    response_process = Process(target=send, args=(shared_dict, sock, timeout, cwnd, cwmax, ack_dict))
     listener_process.start()
     response_process.start()
     keyboard(listener_process, response_process)
 
-def recieve(shared_dict, sock, timeout):
+def recieve(shared_dict, sock, timeout, cwnd, cwmax, ack_dict):
     while True:
         data, adress = sock.recvfrom(4096)
         unpacked_data = unpack_data(data)
-        RTT = time.time() - shared_dict[unpacked_data[0]][0]
-        sRTT = get_estimated_rtt(RTT)
-        timeout = 2 * sRTT
-        shared_dict[unpacked_data[0]] = (RTT, sRTT, timeout)
-        logging.info("RECV: " + str(unpack_data(data)))
-        logging.info("RECV: " + str(adress))
+        RTT = 0
 
-def send(shared_dict, sock, timeout):
+        if cwnd.value < cwmax.value:
+            cwnd.value = cwmax.value
+        else:
+            cwnd.value += 1/cwnd.value
+            cwmax.value = min(cwmax.value, cwnd.value)
+
+        ack_dict[unpacked_data[0]] = True
+
+        last_ack = [ack for ack in list(ack_dict.keys()) if ack_dict[ack] == True][-1]
+        eff_wnd = cwnd.value - (list(ack_dict.keys())[-1] - last_ack) 
+        # BiggestDictKey - BiggestDictKey with True
+
+        if not unpacked_data[1]:
+            RTT = time.time() - shared_dict[unpacked_data[0]][0]
+            sRTT = get_estimated_rtt(RTT)
+            timeout.value = 2 * sRTT
+            shared_dict[unpacked_data[0]] = (RTT, sRTT, timeout.value, int(cwnd.value), int(eff_wnd))
+        logging.info("RECV: " + str(unpack_data(data)))
+
+def send(shared_dict, sock, timeout, cwnd, cwmax, ack_dict):
     sieve.extend(200)
     try:
         for x in range(200):
             time.sleep(1)
             logging.info("DICT: " + str(shared_dict))
-            shared_dict[x] = (time.time(), 0, TimeOut)
+            shared_dict[x] = (time.time(), 0, timeout.value, 0, 0)
             if x in sieve:
                 data = pack_data(x, True, False)
-                resend_thread = Thread(target=resend, args=((x, True, True), sock, timeout))
+                resend_thread = Thread(target=resend, args=((x, True, True), sock, timeout, shared_dict, cwnd, cwmax))
                 resend_thread.start()
             else:
                 data = pack_data(x, False, False)
-                
+            ack_dict[x] = False
             logging.info("SEND: " + str(struct.unpack("=B??", data)))
             _ = sock.sendto(data, (IP, PORT))
     finally:
         logging.info("CLOSING")
         sock.close()
 
-def resend(segment, sock, timeout):
-    print(timeout)
+def resend(segment, sock, timeout, shared_dict, cwnd, cwmax):
+    timeout.value = 2 * timeout.value  # Karn/Partridge algorithm
     data = pack_data(segment[0], segment[1], segment[2])
-    time.sleep(timeout)
+
+    # When TimeOut
+    cwnd.value = cwini
+    cwmax.value = max(cwini, cwmax.value/2)
+
+    shared_dict[segment[0]] = (0, 0, timeout.value, int(cwnd.value), int(shared_dict[segment[0]][4]))  # Measuring RTT only when no retransmission
+    time.sleep(timeout.value)
     logging.info("RESEND: " + str(struct.unpack("=B??", data)))
     _ = sock.sendto(data, (IP, PORT))
 
@@ -79,9 +107,9 @@ def pack_data(package_num, prime, resend):
     fmt = "=B??"
     return struct.pack(fmt, package_num, prime, resend)
 
-def unpack_data(package_num):
-    fmt = "=B"
-    return struct.unpack(fmt, package_num)
+def unpack_data(data):
+    fmt = "=B?"
+    return struct.unpack(fmt, data)
 
 def get_estimated_rtt(RTT):
     return ALPHA * sRTT + (1 - ALPHA) * RTT

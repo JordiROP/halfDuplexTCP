@@ -1,7 +1,7 @@
 from threading import Thread
 from multiprocessing import Process, Manager
+from sympy import sieve
 
-import typing
 import time
 import struct
 import socket
@@ -39,7 +39,7 @@ def listen(shared_queue, sock):
             resent = unpacked_data[2]
             if not prime or resent:
                 logging.info("RECV: " + str(struct.unpack('=B??', data)))
-                shared_queue.append((package_num, (data, address)))
+                shared_queue.append((package_num, (data, address), time.time()))
                 cwnd[package_num] = len(shared_queue)
                 logging.info("BUFFERSIZE: " + str(len(shared_queue)))
 
@@ -48,20 +48,21 @@ def listen(shared_queue, sock):
         sock.close()
 
 def response(shared_queue, sock):
+    sieve.extend(200)
     try:
         while True:
-            if len(shared_queue) != 0 :
-                if len(shared_queue) < 3:
-                    time.sleep(2.0)
-                    segment = shared_queue.pop(0)
-                    response_thread = Thread(target=send_response, args=(segment,))
-                    response_thread.start()
-                else:
-                    queue_len = len(shared_queue)
-                    for x in reversed(range(queue_len)):
-                        segment = shared_queue.pop(x)
+            if 0 < len(shared_queue) < 3:
+                for idx, elem in enumerate(shared_queue): 
+                    if time.time() - elem[2] >= 2.0:
+                        segment = shared_queue.pop(idx)
                         response_thread = Thread(target=send_response, args=(segment,))
                         response_thread.start()
+            elif len(shared_queue) >= 3:
+                queue_len = len(shared_queue)
+                for x in reversed(range(queue_len)):
+                    segment = shared_queue.pop(x)
+                    response_thread = Thread(target=send_response, args=(segment,))
+                    response_thread.start()
                     
     finally:
         logging.info("CLOSING")
@@ -70,12 +71,11 @@ def response(shared_queue, sock):
 def send_response(segment):
     package_num = pack_data(segment[0])
     address = segment[1][1]
-    logging.info("SEND Package# ACK: " + str(struct.unpack('=B',package_num)[0]))
+    logging.info("SEND Package# ACK: " + str(struct.unpack('=B?',package_num)[0]))
     _ = sock.sendto(package_num, address)
     exit()
 
 def keyboard(listener_process, response_process):
-    logging.info
     while True:
         inpt = input()
         if inpt == 'f' or inpt == 'F':
@@ -84,8 +84,11 @@ def keyboard(listener_process, response_process):
             sys.exit()
 
 def pack_data(package_num):
-    fmt = "=B"
-    return struct.pack(fmt, package_num)
+    fmt = "=B?"
+    is_prime = False
+    if package_num in sieve:
+        is_prime = True
+    return struct.pack(fmt, package_num, is_prime)
 
 def unpack_data(data):
     fmt = "=B??"
