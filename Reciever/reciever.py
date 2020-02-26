@@ -7,7 +7,6 @@ import struct
 import socket
 import sys
 import logging
-import copy
 
 IP = '127.0.0.1'
 PORT = 20001
@@ -21,14 +20,16 @@ def create_socket():
 
 def start_processes(sock):
     manager = Manager()
-    shared_queue = manager.list()
-    listener_process = Process(target=listen, args=(shared_queue, sock))
-    response_process = Process(target=response, args=(shared_queue, sock))
+    shared_queue = manager.dict()
+    last_package_ack = manager.Value('last_package_ack', -1)
+    buffer_size = manager.Value('buffer_size', 0)
+    listener_process = Process(target=listen, args=(shared_queue, sock, last_package_ack, buffer_size))
+    response_process = Process(target=response, args=(shared_queue, sock, last_package_ack, buffer_size))
     listener_process.start()
     response_process.start()
     keyboard(listener_process, response_process)
 
-def listen(shared_queue, sock):
+def listen(shared_queue, sock, last_package, buffer_size):
     logging.info("Server listening")
     try:
         while True:
@@ -39,35 +40,50 @@ def listen(shared_queue, sock):
             resent = unpacked_data[2]
             if not prime or resent:
                 logging.info("RECV: " + str(struct.unpack('=B??', data)))
-                shared_queue.append((package_num, (data, address), time.time()))
+                shared_queue[package_num] = ((data, address), time.time())
                 cwnd[package_num] = len(shared_queue)
-                logging.info("BUFFERSIZE: " + str(len(shared_queue)))
+                buffer_size.value += 1
+                logging.info("BUFFERSIZE: " + str(buffer_size.value))
 
     finally:
         logging.info("CLOSING")
         sock.close()
 
-def response(shared_queue, sock):
+def response(shared_queue, sock, last_package_ack, buffer_size):
     sieve.extend(200)
     try:
         while True:
-            if 0 < len(shared_queue) < 3:
-                for idx, elem in enumerate(shared_queue): 
-                    if time.time() - elem[2] >= 2.0:
-                        segment = shared_queue.pop(idx)
-                        response_thread = Thread(target=send_response, args=(segment,))
-                        response_thread.start()
-            elif len(shared_queue) >= 3:
-                queue_len = len(shared_queue)
-                for x in reversed(range(queue_len)):
-                    segment = shared_queue.pop(x)
-                    response_thread = Thread(target=send_response, args=(segment,))
-                    response_thread.start()
-                    
+            segment = None
+            if 0 < buffer_size.value < 3:
+                packg_num = last_package_ack.value + 1
+                if (packg_num in shared_queue) and (time.time() - shared_queue[packg_num][1] >= 2.0):
+                    segment = (packg_num, shared_queue[packg_num][0], shared_queue[packg_num][1])
+                    del shared_queue[packg_num]
+                    buffer_size.value -= 1
+                    last_package_ack.value = packg_num
+            elif buffer_size.value > 2:
+                segment = get_last_segment(buffer_size, shared_queue, last_package_ack)
+            if segment:
+                response_thread = Thread(target=send_response, args=(segment,))
+                response_thread.start()
+                logging.info("BUFFER SIZE: " + str(buffer_size.value))
+                logging.info("LAST ACK: " + str(last_package_ack.value))
     finally:
         logging.info("CLOSING")
         sock.close()
 
+def get_last_segment(buff_size, shared_queue, last_package_ack):
+    segment = None
+    packg_num = last_package_ack.value + 1
+    while packg_num in shared_queue:
+        segment = (packg_num, shared_queue[packg_num][0], shared_queue[packg_num][1])
+        del shared_queue[packg_num]
+        last_package_ack.value = packg_num
+        packg_num += 1
+        buff_size.value -= 1
+    return segment
+
+    
 def send_response(segment):
     package_num = pack_data(segment[0])
     address = segment[1][1]

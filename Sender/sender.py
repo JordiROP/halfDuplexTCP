@@ -38,7 +38,7 @@ def start_processes(sock):
 
 def recieve(shared_dict, sock, timeout, cwnd, cwmax, ack_dict):
     while True:
-        data, adress = sock.recvfrom(4096)
+        data, _ = sock.recvfrom(4096)
         unpacked_data = unpack_data(data)
         RTT = 0
 
@@ -48,18 +48,24 @@ def recieve(shared_dict, sock, timeout, cwnd, cwmax, ack_dict):
             cwnd.value += 1/cwnd.value
             cwmax.value = min(cwmax.value, cwnd.value)
 
-        ack_dict[unpacked_data[0]] = True
-
+        oldest_pack = unpacked_data[0]
+        while oldest_pack in ack_dict and not ack_dict[oldest_pack]: 
+            ack_dict[unpacked_data[0]] = True
+            oldest_pack -= 1
+        oldest_pack +=1
+        last_ack = unpacked_data[0]
         last_ack = [ack for ack in list(ack_dict.keys()) if ack_dict[ack] == True][-1]
         eff_wnd = cwnd.value - (list(ack_dict.keys())[-1] - last_ack) 
         # BiggestDictKey - BiggestDictKey with True
 
-        if not unpacked_data[1]:
-            RTT = time.time() - shared_dict[unpacked_data[0]][0]
+        for pack_num in range(oldest_pack, last_ack+1):
+            print("PACK_NUM: " + str(pack_num))
+            RTT = time.time() - shared_dict[pack_num][0]
             sRTT = get_estimated_rtt(RTT)
-            timeout.value = 2 * sRTT
-            shared_dict[unpacked_data[0]] = (RTT, sRTT, timeout.value, int(cwnd.value), int(eff_wnd))
-        logging.info("RECV: " + str(unpack_data(data)))
+            shared_dict[pack_num] = (RTT, sRTT, timeout.value, int(cwnd.value), int(eff_wnd))
+            if not unpacked_data[1]:
+                timeout.value = (2 * sRTT)
+            logging.info("RECV: " + str(unpack_data(data)))
 
 def send(shared_dict, sock, timeout, cwnd, cwmax, ack_dict):
     sieve.extend(200)
@@ -82,15 +88,18 @@ def send(shared_dict, sock, timeout, cwnd, cwmax, ack_dict):
         sock.close()
 
 def resend(segment, sock, timeout, shared_dict, cwnd, cwmax):
+    time_ini = time.time()
+    while(time.time() - time_ini <=timeout.value):
+        pass
     timeout.value = 2 * timeout.value  # Karn/Partridge algorithm
+
     data = pack_data(segment[0], segment[1], segment[2])
 
     # When TimeOut
     cwnd.value = cwini
     cwmax.value = max(cwini, cwmax.value/2)
 
-    shared_dict[segment[0]] = (0, 0, timeout.value, int(cwnd.value), int(shared_dict[segment[0]][4]))  # Measuring RTT only when no retransmission
-    time.sleep(timeout.value)
+    shared_dict[segment[0]] = (shared_dict[segment[0]][0],shared_dict[segment[0]][1], timeout.value, int(cwnd.value), int(shared_dict[segment[0]][4]))  # Measuring RTT only when no retransmission
     logging.info("RESEND: " + str(struct.unpack("=B??", data)))
     _ = sock.sendto(data, (IP, PORT))
 
