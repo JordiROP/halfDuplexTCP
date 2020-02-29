@@ -64,6 +64,7 @@ def response(shared_queue, sock, last_package_ack, buffer_size):
             elif buffer_size.value > 2:
                 segment = get_last_segment(buffer_size, shared_queue, last_package_ack)
             if segment:
+                print("SIZE OF BUFFER: " + str(len(shared_queue)))
                 response_thread = Thread(target=send_response, args=(segment,))
                 response_thread.start()
                 logging.info("BUFFER SIZE: " + str(buffer_size.value))
