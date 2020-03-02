@@ -57,13 +57,14 @@ def recieve(shared_dict, sock, timeout, wnd_dict, ack_dict, last_ack):
                 sRTT = get_estimated_rtt(RTT, shared_dict[pack_num][1])
                 shared_dict[pack_num] = (RTT, sRTT, timeout.value, wnd_dict['cwnd'], wnd_dict['effwnd'])
                 timeout.value = (2 * sRTT)
-        print(str(time.strftime('%H:%M:%S') + '|RECIEVE|' + str(wnd_dict['effwnd']) + '|' +  str(wnd_dict['cwnd']) + '|' + '0' + '|' + str(shared_dict[last_ack.value][1]) + '|' + str(shared_dict[last_ack.value][2])))
+        print(str(round(time.time())) + '|RECIEVE|' + str(wnd_dict['effwnd']) + '|' +  str(wnd_dict['cwnd']) + '|' + str(round(shared_dict[last_ack.value][0], 2)) + '|' + str(round(shared_dict[last_ack.value][1], 2)) + '|' + str(round(shared_dict[last_ack.value][2], 2)))
 
 def send(shared_dict, sock, timeout, wnd_dict, ack_dict, last_ack):
     sieve.extend(200)
     x = 0
+    init_time = time.time()
     try:
-        while x <= 200:
+        while time.time() - init_time <= 200:
             if wnd_dict['effwnd'] > 0:
                 time.sleep(1)
                 ini_sRTT = sRTT if (x == 0 or (x-1) in sieve) else shared_dict[last_ack.value][1]
@@ -78,7 +79,7 @@ def send(shared_dict, sock, timeout, wnd_dict, ack_dict, last_ack):
                     ack_dict[x] = False
                     _ = sock.sendto(data, (IP, PORT))
                 wnd_dict['effwnd'] = int(wnd_dict['cwnd'] - ((x+1) - (last_ack.value+1)))
-                print(str(time.strftime('%H:%M:%S') + '|SEND|' + str(wnd_dict['effwnd']) + '|' +  str(wnd_dict['cwnd']) + '|' + str(shared_dict[x][0]) + '|' + str(shared_dict[x][1]) + '|' + str(shared_dict[x][2])))
+                print(str(round(time.time())) + '|SEND|' + str(wnd_dict['effwnd']) + '|' +  str(wnd_dict['cwnd']) + '|' + str(round(shared_dict[x][0], 2)) + '|' + str(round(shared_dict[x][1], 2)) + '|' + str(round(shared_dict[x][2], 2)))
                 x+=1
     except:
         print(sys.exc_info()[0])
@@ -86,6 +87,7 @@ def send(shared_dict, sock, timeout, wnd_dict, ack_dict, last_ack):
         while last_ack.value <= 200:
             pass
         sock.close()
+        sys.exit()
 
 def resend(segment, sock, timeout, shared_dict, wnd_dict, last_ack):
     time_ini = time.time()
@@ -99,7 +101,7 @@ def resend(segment, sock, timeout, shared_dict, wnd_dict, last_ack):
     wnd_dict['cwmax'] = max(cwini, int(wnd_dict['cwmax']/2))
 
     shared_dict[segment[0]] = (shared_dict[segment[0]][0], sRTT, timeout.value, wnd_dict['cwnd'], int(shared_dict[segment[0]][4]))  # Measuring RTT only when no retransmission
-    print(str(time.strftime('%H:%M:%S') + '|RESEND|' + str(wnd_dict['effwnd']) + '|' +  str(wnd_dict['cwnd']) + '|' + str(shared_dict[segment[0]][0]) + '|' + str(shared_dict[segment[0]][1]) + '|' + str(shared_dict[segment[0]][2])))
+    print(str(round(time.time())) + '|RESEND|' + str(wnd_dict['effwnd']) + '|' +  str(wnd_dict['cwnd']) + '|' + str(round(shared_dict[segment[0]][0], 2)) + '|' + str(round(shared_dict[segment[0]][1], 2)) + '|' + str(round(shared_dict[segment[0]][2], 2)))
     _ = sock.sendto(data, (IP, PORT))
 
 def keyboard(listener_process, response_process):
@@ -122,5 +124,6 @@ def get_estimated_rtt(RTT, sRTT):
     return ALPHA * sRTT + (1 - ALPHA) * RTT
 
 if __name__ == "__main__":
+    print("Time|Event|Eff.Win|cwnd|RTT|sRTT|TOut")
     sock = create_socket()
     start_processes(sock)
