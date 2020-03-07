@@ -34,16 +34,11 @@ def listen(shared_queue, sock, last_package, buffer_size):
     try:
         while True:
             data, address = sock.recvfrom(4096)
-            unpacked_data = unpack_data(data) 
-            package_num = unpacked_data[0]
-            prime = unpacked_data[1]
-            resent = unpacked_data[2]
-            if not prime or resent:
-                logging.info("RECV: " + str(struct.unpack('=B??', data)))
-                shared_queue[package_num] = ((data, address), time.time())
-                cwnd[package_num] = len(shared_queue)
-                buffer_size.value += 1
-                logging.info("BUFFERSIZE: " + str(buffer_size.value))
+            package_num = unpack_data(data)[0]
+            logging.info("RECV: " + str(package_num))
+            shared_queue[package_num] = ((data, address), time.time())
+            cwnd[package_num] = len(shared_queue)
+            buffer_size.value += 1
 
     finally:
         logging.info("CLOSING")
@@ -64,11 +59,8 @@ def response(shared_queue, sock, last_package_ack, buffer_size):
             elif buffer_size.value > 2:
                 segment = get_last_segment(buffer_size, shared_queue, last_package_ack)
             if segment:
-                print("SIZE OF BUFFER: " + str(len(shared_queue)))
                 response_thread = Thread(target=send_response, args=(segment,))
                 response_thread.start()
-                logging.info("BUFFER SIZE: " + str(buffer_size.value))
-                logging.info("LAST ACK: " + str(last_package_ack.value))
     finally:
         logging.info("CLOSING")
         sock.close()
@@ -88,7 +80,7 @@ def get_last_segment(buff_size, shared_queue, last_package_ack):
 def send_response(segment):
     package_num = pack_data(segment[0])
     address = segment[1][1]
-    logging.info("SEND Package# ACK: " + str(struct.unpack('=B?',package_num)[0]))
+    logging.info("SEND: " + str(struct.unpack('=B?',package_num)[0]))
     _ = sock.sendto(package_num, address)
     exit()
 
@@ -101,14 +93,11 @@ def keyboard(listener_process, response_process):
             sys.exit()
 
 def pack_data(package_num):
-    fmt = "=B?"
-    is_prime = False
-    if package_num in sieve:
-        is_prime = True
-    return struct.pack(fmt, package_num, is_prime)
+    fmt = "=B"
+    return struct.pack(fmt, package_num)
 
 def unpack_data(data):
-    fmt = "=B??"
+    fmt = "=B"
     return struct.unpack(fmt, data)
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+Pack.Num|Time|Event|Eff.Win|cwnd|RTT|sRTT|TOut
+0|0.06|SEND|0|1|0|10|10.0
+1|2.09|SEND|1|2|0|8.4|16.8
+2|3.19|SEND|0|2|0|8.4|16.8
